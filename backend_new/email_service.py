@@ -2,8 +2,8 @@ import smtplib
 from email.mime.text import MIMEText
 
 def send_alert_email(to_email, student_name, risk_score, course, instructor):
-    sender_email = "red03122005@gmail.com"
-    sender_password = "qwwxuxnrpszmgnqg"
+    sender_email = ""
+    sender_password = ""
 
     msg = MIMEText(
         f"""
@@ -32,3 +32,4 @@ def send_alert_email(to_email, student_name, risk_score, course, instructor):
         print("Email alert sent successfully.")
     except Exception as e:
         print("Email sending failed:", str(e))
+
