@@ -19,12 +19,15 @@ CREATE TABLE users (
 DROP TABLE IF EXISTS records;
 CREATE TABLE records (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  student_name VARCHAR(50) NOT NULL,
+  -- encrypted student name (Fernet base64) stored here; length expanded
+  student_name VARCHAR(512) NOT NULL,
+  -- deterministic HMAC for lookups (sha256 hex)
+  student_hmac VARCHAR(128),
   marks INT,
   attendance INT,
   risk_score FLOAT,
-  course VARCHAR(50),
-  instructor_name VARCHAR(50),
+  course VARCHAR(255),
+  instructor_name VARCHAR(100),
   timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
