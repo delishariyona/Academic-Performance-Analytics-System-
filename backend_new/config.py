@@ -2,8 +2,8 @@
 DB_CONFIG = {
     "host": "localhost",
     "user": "root",          # change if you use a different user
-    "password": "pedvbhat26$",  # your MySQL password
-    "database": "apas"
+    "password": "",  # your MySQL password
+    "database": ""
 }
 
 EMAIL_CONFIG = {
@@ -12,3 +12,4 @@ EMAIL_CONFIG = {
     "EMAIL": "your_gmail_here@gmail.com",
     "PASSWORD": "your_app_password_here"
 }
+
