@@ -4,9 +4,20 @@ import requests
 import pandas as pd
 import plotly.express as px
 import time
+from streamlit_autorefresh import st_autorefresh
 
-API_BASE = "http://localhost:5000/api"
+# keep a single Session so cookies persist between requests
+if "session_req" not in st.session_state:
+    st.session_state.session_req = requests.Session()
+
+session_req = st.session_state.session_req
+session_req.trust_env = False
+session_req.headers.update({"Accept": "application/json"})
+
+API_BASE = "http://127.0.0.1:5000/api"
+ST_ORIGIN = "http://localhost:8501"
 st.set_page_config(page_title="APAS Dashboard", layout="wide")
+st_autorefresh(interval=90100, key="refresh_app")
 
 # Session state
 if "logged_in" not in st.session_state:
@@ -15,14 +26,11 @@ if "logged_in" not in st.session_state:
     st.session_state.username = None
 
 def safe_json(res):
-    """
-    Try to parse JSON, but return fallback dict/text if the backend responded with non-JSON
-    """
     try:
         return res.json()
     except Exception:
-        # not JSON - return text wrapper
         return {"success": False, "message": res.text or "Non-JSON response", "status_code": res.status_code}
+
 
 def do_login():
     username = st.session_state.get("login_username")
@@ -31,7 +39,7 @@ def do_login():
         st.error("Enter username and password.")
         return
     try:
-        res = requests.post(f"{API_BASE}/login", json={"username": username, "password": password})
+        res = session_req.post(f"{API_BASE}/login", json={"username": username, "password": password})
         data = safe_json(res)
         if res.status_code == 200 and data.get("success"):
             st.session_state.logged_in = True
@@ -54,6 +62,24 @@ if not st.session_state.logged_in:
     st.markdown("**Demo accounts:** admin/adminpass, instructor1/instructorpass, student1/studentpass")
     st.stop()
 
+# # ---------------- RBAC TEST PANEL ----------------
+# st.markdown("## RBAC Test Panel")
+
+# endpoints = {
+#     "Student's own data": f"/student/{st.session_state.username}",
+#     "Admin-only: all records": "/all_records",
+#     "Admin-only: users": "/users",
+#     "Admin-only: audit logs": "/audit_logs",
+#     "Admin-only: settings": "/settings",
+#     "Instructor-only: instructor data": f"/instructor/{st.session_state.username}"
+# }
+
+# for label, ep in endpoints.items():
+#     url = f"http://127.0.0.1:5000/api{ep}"
+#     res = session_req.get(url)
+#     st.write(f"**{label}** → {res.status_code}")
+# # ---------------------------------------------------
+
 # Logout
 if st.button("Logout"):
     st.session_state.clear()
@@ -64,11 +90,7 @@ username = st.session_state.username
 st.sidebar.title("Navigation")
 st.sidebar.write(f"👤 {username} ({role})")
 
-import time
-
-SESSION_TIMEOUT = 900   # 15 mins
-
-# TRACK SESSION TIME
+SESSION_TIMEOUT = 900
 if "last_active" not in st.session_state:
     st.session_state.last_active = time.time()
 else:
@@ -76,14 +98,11 @@ else:
         st.warning("Session expired. Please login again.")
         st.session_state.clear()
         st.rerun()
-
-# update activity timestamp
 st.session_state.last_active = time.time()
 
-# Fetch settings (threshold & model version) once
 def fetch_settings():
     try:
-        r = requests.get(f"{API_BASE}/settings")
+        r = session_req.get(f"{API_BASE}/settings")
         data = safe_json(r)
         if r.status_code == 200:
             return data
@@ -95,12 +114,11 @@ settings = fetch_settings()
 threshold = float(settings.get("risk_threshold", 0.6))
 model_version = settings.get("model_version", "1")
 
-# ----------------- STUDENT DASHBOARD -----------------
+# STUDENT
 if role == "student":
     st.title("📊 Student Dashboard")
     st.info("View your performance, attendance, and predicted risk scores.")
-
-    res = requests.get(f"{API_BASE}/student/{username}")
+    res = session_req.get(f"{API_BASE}/student/{username}")
     data = safe_json(res)
     if res.status_code == 200:
         df = pd.DataFrame(data)
@@ -121,8 +139,7 @@ if role == "student":
     else:
         st.error(data.get("message", "Failed to fetch student data."))
 
-    # show alerts if any for this student
-    a_res = requests.get(f"{API_BASE}/alerts")
+    a_res = session_req.get(f"{API_BASE}/alerts")
     a_data = safe_json(a_res)
     if a_res.status_code == 200:
         alerts = pd.DataFrame(a_data)
@@ -133,7 +150,7 @@ if role == "student":
                 st.dataframe(my_alerts[['student_name','risk_score','created_at']])
     st.stop()
 
-# ----------------- INSTRUCTOR DASHBOARD -----------------
+# INSTRUCTOR
 if role == "instructor":
     st.title("🧑‍🏫 Instructor Dashboard")
     st.info("Upload and monitor student performance data for your courses.")
@@ -147,7 +164,7 @@ if role == "instructor":
         course = st.text_input("Course")
         submitted = st.form_submit_button("Add")
         if submitted:
-            res = requests.post(f"{API_BASE}/add_record", json={
+            res = session_req.post(f"{API_BASE}/add_record", json={
                 "student_name": sname, "marks": marks, "attendance": attendance,
                 "course": course, "instructor": instructor
             })
@@ -166,7 +183,7 @@ if role == "instructor":
             st.dataframe(df.head())
             if st.button("Upload CSV to Backend"):
                 records = df.to_dict(orient="records")
-                res = requests.post(f"{API_BASE}/add_records", json={"records": records, "instructor": instructor})
+                res = session_req.post(f"{API_BASE}/add_records", json={"records": records, "instructor": instructor})
                 data = safe_json(res)
                 if res.status_code == 200 and data.get("success"):
                     st.success(f"Uploaded {data.get('processed')} valid records")
@@ -177,7 +194,7 @@ if role == "instructor":
 
     st.markdown("---")
     st.subheader("📊 My Class Records")
-    r = requests.get(f"{API_BASE}/instructor/{instructor}")
+    r = session_req.get(f"{API_BASE}/instructor/{instructor}")
     rdata = safe_json(r)
     if r.status_code == 200:
         df = pd.DataFrame(rdata)
@@ -195,8 +212,7 @@ if role == "instructor":
     else:
         st.error(rdata.get("message", "Failed to load class data."))
 
-    # show alerts for this instructor's students
-    a_res = requests.get(f"{API_BASE}/alerts")
+    a_res = session_req.get(f"{API_BASE}/alerts")
     a_data = safe_json(a_res)
     if a_res.status_code == 200:
         alerts = pd.DataFrame(a_data)
@@ -208,13 +224,13 @@ if role == "instructor":
 
     st.stop()
 
-# ----------------- ADMIN DASHBOARD -----------------
+# ADMIN
 if role == "admin":
     st.title("🧑‍💼 Admin Dashboard")
     st.info("Institution overview, settings, alerts and user management.")
-    # settings
+
     st.subheader("⚙️ System Settings")
-    s_res = requests.get(f"{API_BASE}/settings")
+    s_res = session_req.get(f"{API_BASE}/settings")
     s_data = safe_json(s_res)
     if s_res.status_code == 200:
         s = s_data
@@ -226,7 +242,7 @@ if role == "admin":
 
     new_thresh = st.slider("Risk threshold (students with risk >= threshold generate alerts)", 0.0, 1.0, cur_thresh, 0.05)
     if st.button("Save Threshold"):
-        r = requests.post(f"{API_BASE}/settings", json={"key": "risk_threshold", "value": str(new_thresh), "username": username})
+        r = session_req.post(f"{API_BASE}/settings", json={"key": "risk_threshold", "value": str(new_thresh), "username": username})
         d = safe_json(r)
         if r.status_code == 200 and d.get("success"):
             st.success("Threshold updated")
@@ -237,7 +253,7 @@ if role == "admin":
 
     st.markdown(f"**Current model version:** {cur_model}")
     if st.button("Retrain (simulate) model"):
-        rr = requests.post(f"{API_BASE}/retrain_model", json={"username": username})
+        rr = session_req.post(f"{API_BASE}/retrain_model", json={"username": username})
         rd = safe_json(rr)
         if rr.status_code == 200 and rd.get("success"):
             st.success(f"Model retrained to version {rd.get('model_version')}")
@@ -246,9 +262,8 @@ if role == "admin":
             st.error(rd.get("message", "Retrain failed"))
 
     st.markdown("---")
-    # analytics
     st.subheader("📈 Institution Analytics")
-    res = requests.get(f"{API_BASE}/all_records")
+    res = session_req.get(f"{API_BASE}/all_records")
     rdata = safe_json(res)
     if res.status_code == 200:
         df = pd.DataFrame(rdata)
@@ -270,9 +285,8 @@ if role == "admin":
         st.error(rdata.get("message", "Failed to load analytics"))
 
     st.markdown("---")
-    #export to pdf
     if st.button("Export Dashboard PDF"):
-        r = requests.get(f"{API_BASE}/export_pdf")
+        r = session_req.get(f"{API_BASE}/export_pdf")
         d = safe_json(r)
         if r.status_code == 200 and d.get("success"):
             st.success("PDF generated: " + d.get("path"))
@@ -280,7 +294,7 @@ if role == "admin":
             st.error(d.get("message", "PDF export failed") + " - " + str(d.get("error", "")))
 
     if st.button("Export Anonymized CSV"):
-        r = requests.get(f"{API_BASE}/export")
+        r = session_req.get(f"{API_BASE}/export")
         d = safe_json(r)
         if r.status_code == 200 and d.get("success"):
             st.success("CSV generated: " + d.get("path"))
@@ -288,9 +302,8 @@ if role == "admin":
             st.error(d.get("message", "CSV export failed") + " - " + str(d.get("error", "")))
 
     st.markdown("---")
-    # alerts view
     st.subheader("🔔 Alerts (students above threshold)")
-    a_res = requests.get(f"{API_BASE}/alerts")
+    a_res = session_req.get(f"{API_BASE}/alerts")
     a_data = safe_json(a_res)
     if a_res.status_code == 200:
         alerts_df = pd.DataFrame(a_data)
@@ -302,9 +315,8 @@ if role == "admin":
         st.error(a_data.get("message", "Failed to load alerts"))
 
     st.markdown("---")
-    # user management
     st.subheader("👥 User Management")
-    users_res = requests.get(f"{API_BASE}/users")
+    users_res = session_req.get(f"{API_BASE}/users")
     users_data = safe_json(users_res)
     if users_res.status_code == 200:
         users_df = pd.DataFrame(users_data)
@@ -321,7 +333,7 @@ if role == "admin":
         if not new_u or not new_p:
             st.error("Provide username & password")
         else:
-            cr = requests.post(f"{API_BASE}/users", json={"username": new_u, "password": new_p, "role": new_r})
+            cr = session_req.post(f"{API_BASE}/users", json={"username": new_u, "password": new_p, "role": new_r})
             cdata = safe_json(cr)
             if cr.status_code == 200 and cdata.get("success"):
                 st.success("User created")
@@ -330,9 +342,8 @@ if role == "admin":
                 st.error(f"Create failed: {cdata.get('message', cr.text)}")
 
     st.markdown("---")
-    # audit logs
     st.subheader("📜 Audit Log (recent)")
-    al = requests.get(f"{API_BASE}/audit_logs")
+    al = session_req.get(f"{API_BASE}/audit_logs")
     al_data = safe_json(al)
     if al.status_code == 200:
         al_df = pd.DataFrame(al_data)

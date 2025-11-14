@@ -1,0 +1,19 @@
+id,marks,attendance,risk_score,course,instructor_name,timestamp,student_alias
+1,85,92,0.122,Data Science,instructor1,2025-11-13 20:25:23,sid_6854
+2,60,70,0.36,Artificial Intelligence,instructor1,2025-11-13 20:25:23,sid_3647
+3,45,65,0.47,Data Science,instructor1,2025-11-13 20:25:24,sid_843
+4,30,50,0.62,Artificial Intelligence,instructor1,2025-11-13 20:25:24,sid_3169
+5,95,98,0.038,Data Science,instructor1,2025-11-13 20:25:25,sid_2041
+6,75,80,0.23,Artificial Intelligence,instructor1,2025-11-13 20:25:25,sid_93
+7,55,60,0.43,Data Science,instructor1,2025-11-13 20:25:25,sid_3047
+8,40,45,0.58,Artificial Intelligence,instructor1,2025-11-13 20:25:26,sid_4004
+9,78,96,0.148,Artificial Intelligence,instructor1,2025-11-13 20:26:13,sid_4004
+10,56,77,0.356,Data Science,instructor1,2025-11-13 20:51:39,sid_6854
+11,88,90,0.112,Machine Learning,instructor1,2025-11-13 21:05:52,sid_6854
+12,70,75,0.28,Database Systems,instructor1,2025-11-13 21:05:52,sid_3647
+13,55,58,0.438,Machine Learning,instructor1,2025-11-13 21:05:52,sid_843
+14,40,50,0.56,Database Systems,instructor1,2025-11-13 21:05:53,sid_3169
+15,92,94,0.072,Machine Learning,instructor1,2025-11-13 21:05:53,sid_2041
+16,62,65,0.368,Database Systems,instructor1,2025-11-13 21:05:53,sid_93
+17,35,40,0.63,Machine Learning,instructor1,2025-11-13 21:05:54,sid_3047
+18,78,85,0.192,Database Systems,instructor1,2025-11-13 21:05:54,sid_4004

@@ -5,3 +5,11 @@ DB_CONFIG = {
     "password": "Prabhu12#*",  # your MySQL password
     "database": "apas"
 }
+
+EMAIL_CONFIG = {
+    "SMTP_SERVER": "smtp.gmail.com",
+    "SMTP_PORT": 587,
+    "EMAIL": "",
+    "PASSWORD": ""
+}
+

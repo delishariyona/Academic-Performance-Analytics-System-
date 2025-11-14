@@ -171,15 +171,16 @@ def add_record():
     if risk >= threshold:
         db = get_db()
         cur = db.cursor()
-        cur.execute("INSERT INTO alerts (student_name, risk_score, record_id) VALUES (%s,%s,%s)",
-                    (student_name, risk, rec_id))
+        cur.execute("""
+            INSERT INTO alerts (student_name, risk_score, course, instructor_name)
+            VALUES (%s, %s, %s, %s)
+        """, (student_name, risk, course, instructor))
         db.commit()
         cur.close()
         db.close()
 
     audit(instructor or "unknown", "add_record", {"student": student_name, "risk": risk, "record_id": rec_id})
     return jsonify({"success": True, "risk_score": risk})
-
 
 # ================================
 # ADD MULTIPLE RECORDS (CSV)
@@ -204,23 +205,26 @@ def add_records():
         course = rec.get("course", "")
 
         if not valid_student(student_name):
-            # skip invalid students
-            continue
+            continue  # skip invalid students
 
         risk = predict_risk(marks, attendance)
+
+        # store record
         cur.execute("""
             INSERT INTO records (student_name, marks, attendance, risk_score, course, instructor_name)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (student_name, marks, attendance, risk, course, instructor))
-        lastid = cur.lastrowid
+
         inserted_count += 1
 
-        # alert
+        # CREATE ALERT if risk ≥ threshold
         threshold = float(get_setting("risk_threshold", 0.6))
         if risk >= threshold:
             cur2 = db.cursor()
-            cur2.execute("INSERT INTO alerts (student_name, risk_score, record_id) VALUES (%s,%s,%s)",
-                         (student_name, risk, lastid))
+            cur2.execute("""
+                INSERT INTO alerts (student_name, risk_score, course, instructor_name)
+                VALUES (%s, %s, %s, %s)
+            """, (student_name, risk, course, instructor))
             cur2.close()
             created_alerts += 1
 
@@ -230,7 +234,6 @@ def add_records():
 
     audit(instructor or "unknown", "bulk_add_records", {"processed": inserted_count, "alerts": created_alerts})
     return jsonify({"success": True, "processed": inserted_count})
-
 
 # ================================
 # STUDENT DASHBOARD DATA
@@ -420,6 +423,7 @@ def list_users():
     cur.close()
     db.close()
     return jsonify(rows)
+
 
 @app.route('/api/users', methods=['POST'])
 def create_user():

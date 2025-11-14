@@ -1,5 +1,5 @@
 # backend/app.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session, abort
 from flask_cors import CORS
 from models import get_db
 from ml_engine import predict_risk, get_model_version, rebuild_model
@@ -7,8 +7,52 @@ import pandas as pd
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import traceback
+from flask import Flask, request, jsonify, session
 
-# optional: if you implemented email_service earlier keep it; if not, it's safe to remove import
+# ------------------- App + CORS / sessions config -------------------
+app = Flask(__name__)
+app.config['SECRET_KEY'] = '127e4628cb846d2d1473092708ff211f7da769bc37dab3ee945293fea4f0d1c4'
+# Set a secret key (in production use an env var)
+# app.secret_key = "MY_SUPER_SECRET_KEY_123"
+# ---- FIXED COOKIE SETTINGS FOR LOCALHOST ----
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = False   # THIS LINE IS CRITICAL ON LOCALHOST
+app.config['SESSION_COOKIE_SAMESITE'] = "Lax"
+from flask_session import Session
+
+app.config['SESSION_TYPE'] = 'filesystem'
+Session(app)
+
+# IMPORTANT: when supports_credentials=True you must NOT use origins="*" .
+# We're explicitly allowing your Streamlit origin:
+CORS(app,
+     supports_credentials=True,
+     origins=[
+         "http://localhost:8501",
+         "http://127.0.0.1:8501",
+         "http://192.168.1.18:8501"
+     ])
+
+# ------------------- Utility functions -------------------
+def require_role(allowed_roles):
+    username = session.get("username")
+    if not username:
+        abort(401)  # Not logged in
+
+    db = get_db()
+    cur = db.cursor(dictionary=True)
+    cur.execute("SELECT role FROM users WHERE username = %s", (username,))
+    user = cur.fetchone()
+    cur.close()
+    db.close()
+
+    if not user:
+        abort(401)
+
+    if user["role"] not in allowed_roles:
+        abort(403)  # Forbidden
+
+# optional: email
 try:
     from email_service import send_alert_email
     EMAIL_AVAILABLE = True
@@ -21,10 +65,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 
-app = Flask(__name__)
-CORS(app)
-
-# ------------------------- DB / UTIL FUNCTIONS
+# ------------------- DB helpers & audit -------------------
 def ensure_tables():
     db = get_db()
     cur = db.cursor()
@@ -49,7 +90,6 @@ def ensure_tables():
         record_id INT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""")
-    # default settings
     cur.execute("SELECT value FROM settings WHERE `key`='risk_threshold'")
     r = cur.fetchone()
     if not r:
@@ -88,10 +128,9 @@ def audit(username, action, details=""):
     cur.close()
     db.close()
 
-# ensure tables exist
 ensure_tables()
 
-# ---------------------- users / helpers
+# ------------------- users helpers -------------------
 def get_user(username):
     db = get_db()
     cur = db.cursor(dictionary=True)
@@ -125,26 +164,55 @@ def fetch_user_record(username, password):
         return None
     return None
 
-# ---------------------- routes
+# ------------------- routes -------------------
 @app.route('/api/login', methods=['POST'])
 def login():
     try:
         data = request.get_json() or {}
         username = data.get("username")
         password = data.get("password")
+
         user = fetch_user_record(username, password)
         if user:
+            # set session
+            session['username'] = user["username"]
+
             audit(username, "login", {"success": True})
-            return jsonify({"success": True, "role": user["role"], "username": user["username"]})
+
+            # IMPORTANT PART — build response manually
+            resp = jsonify({
+                "success": True,
+                "role": user["role"],
+                "username": user["username"]
+            })
+
+            # allow cookie to pass
+            origin = request.headers.get("Origin")
+            if origin:
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                resp.headers["Access-Control-Allow-Origin"] = origin
+
+            return resp
+
         else:
             audit(username or "unknown", "login", {"success": False})
-            return jsonify({"success": False, "message": "Invalid credentials"}), 401
+            resp = jsonify({"success": False, "message": "Invalid credentials"})
+            resp.status_code = 401
+
+            origin = request.headers.get("Origin")
+            if origin:
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                resp.headers["Access-Control-Allow-Origin"] = origin
+
+            return resp
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"success": False, "message": "Server error on login", "error": str(e)}), 500
 
 @app.route('/api/add_record', methods=['POST'])
 def add_record():
+    require_role(["instructor"])
     try:
         data = request.get_json() or {}
         student_name = data.get("student_name")
@@ -157,7 +225,6 @@ def add_record():
             audit(instructor or "unknown", "add_record", {"student": student_name, "status": "invalid_student"})
             return jsonify({"success": False, "message": f"'{student_name}' is not a valid student"}), 400
 
-        # ensure numeric
         try:
             marks = float(marks)
         except:
@@ -171,7 +238,6 @@ def add_record():
 
         db = get_db()
         cur = db.cursor()
-        # truncate course to reasonable length to avoid DB column overflow (you said you increased to 255 earlier)
         cur.execute("""
             INSERT INTO records (student_name, marks, attendance, risk_score, course, instructor_name)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -181,7 +247,6 @@ def add_record():
         cur.close()
         db.close()
 
-        # create alert & optional email
         threshold = float(get_setting("risk_threshold", 0.6))
         if risk >= threshold:
             db2 = get_db()
@@ -195,14 +260,13 @@ def add_record():
             if EMAIL_AVAILABLE:
                 try:
                     send_alert_email(
-                        to_email="simabi4322@agenra.com",
+                        to_email="savah19648@gyknife.com",
                         student_name=student_name,
                         risk_score=risk,
                         course=course,
                         instructor=instructor
                     )
                 except Exception as e:
-                    # log, but do not crash route
                     print("Email send failed:", e)
 
         audit(instructor or "unknown", "add_record", {"student": student_name, "risk": risk, "record_id": rec_id})
@@ -213,6 +277,7 @@ def add_record():
 
 @app.route('/api/add_records', methods=['POST'])
 def add_records():
+    require_role(["instructor"])
     try:
         data = request.get_json() or {}
         records = data.get("records", [])
@@ -262,6 +327,10 @@ def add_records():
 
 @app.route('/api/student/<username>', methods=['GET'])
 def student_data(username):
+    require_role(["student"])
+    if session.get("username") != username:
+        abort(403)
+
     try:
         db = get_db()
         cur = db.cursor(dictionary=True)
@@ -274,7 +343,6 @@ def student_data(username):
         rows = cur.fetchall()
         cur.close()
         db.close()
-        # ensure numeric types
         for r in rows:
             r['marks'] = float(r['marks']) if r.get('marks') is not None else None
             r['attendance'] = float(r['attendance']) if r.get('attendance') is not None else None
@@ -286,6 +354,7 @@ def student_data(username):
 
 @app.route('/api/instructor/<username>', methods=['GET'])
 def instructor_data(username):
+    require_role(["instructor"])
     try:
         db = get_db()
         cur = db.cursor(dictionary=True)
@@ -309,11 +378,11 @@ def instructor_data(username):
 
 @app.route('/api/all_records', methods=['GET'])
 def all_records():
+    require_role(["admin"])
     try:
         db = get_db()
         df = pd.read_sql("SELECT * FROM records", db)
         db.close()
-        # ensure numeric types for JSON
         if not df.empty:
             df['marks'] = df['marks'].astype(float)
             df['attendance'] = df['attendance'].astype(float)
@@ -325,10 +394,10 @@ def all_records():
 
 @app.route('/api/export', methods=['GET'])
 def export_csv():
+    require_role(["admin"])
     try:
         db = get_db()
         df = pd.read_sql("SELECT * FROM records", db)
-        # anonymize by aliasing
         df["student_alias"] = df["student_name"].apply(lambda x: f"sid_{abs(hash(x)) % 10000}")
         df.drop(columns=["student_name"], inplace=True)
         path = "report_anonymized.csv"
@@ -342,19 +411,16 @@ def export_csv():
 
 @app.route('/api/export_pdf', methods=['GET'])
 def export_pdf():
+    require_role(["admin"])
     try:
         db = get_db()
         df = pd.read_sql("SELECT * FROM records", db)
         db.close()
-
         filename = "dashboard_report.pdf"
         doc = SimpleDocTemplate(filename, pagesize=A4)
         styles = getSampleStyleSheet()
         elems = []
-
         elems.append(Paragraph("APAS Dashboard Report", styles['Heading1']))
-
-        # Convert dataframe to table - convert to strings so reportlab can render
         data = [df.columns.tolist()] + df.astype(str).values.tolist()
         table = Table(data)
         table.setStyle(TableStyle([
@@ -362,10 +428,8 @@ def export_pdf():
             ('GRID', (0,0), (-1,-1), 1, colors.black),
             ('FONT', (0,0), (-1,-1), 'Helvetica', 8)
         ]))
-
         elems.append(table)
         doc.build(elems)
-
         audit("admin", "export_pdf", {"path": filename})
         return jsonify({"success": True, "path": filename})
     except Exception as e:
@@ -374,7 +438,12 @@ def export_pdf():
 
 @app.route('/api/alerts', methods=['GET'])
 def list_alerts():
+    # Alerts should be visible to admin and instructor; students will only see alerts filtered on frontend
     try:
+        # allow instructors & admin; allow students to fetch (they get filtered client-side)
+        username = session.get("username")
+        if not username:
+            abort(401)
         db = get_db()
         cur = db.cursor(dictionary=True)
         cur.execute("SELECT id, student_name, risk_score, record_id, created_at FROM alerts ORDER BY created_at DESC")
@@ -388,6 +457,7 @@ def list_alerts():
 
 @app.route('/api/audit_logs', methods=['GET'])
 def get_audit_logs():
+    require_role(["admin"])
     try:
         db = get_db()
         cur = db.cursor(dictionary=True)
@@ -402,7 +472,12 @@ def get_audit_logs():
 
 @app.route('/api/settings', methods=['GET'])
 def settings_get():
+    # Settings are admin only for reading/updating in UI; but we'll allow authenticated users to read threshold
+    username = session.get("username")
+    if not username:
+        abort(401)
     try:
+        # let everyone view threshold so student UI can show it
         threshold = float(get_setting("risk_threshold", 0.6))
         model_version = get_setting("model_version", "1")
         return jsonify({"risk_threshold": threshold, "model_version": model_version})
@@ -412,6 +487,7 @@ def settings_get():
 
 @app.route('/api/settings', methods=['POST'])
 def settings_post():
+    require_role(["admin"])
     try:
         data = request.get_json() or {}
         key = data.get("key")
@@ -427,6 +503,7 @@ def settings_post():
 
 @app.route('/api/retrain_model', methods=['POST'])
 def retrain_model():
+    require_role(["admin"])
     try:
         data = request.get_json() or {}
         user = data.get("username", "admin")
@@ -442,6 +519,7 @@ def retrain_model():
 
 @app.route('/api/users', methods=['GET'])
 def list_users():
+    require_role(["admin"])
     try:
         db = get_db()
         cur = db.cursor(dictionary=True)
@@ -456,6 +534,7 @@ def list_users():
 
 @app.route('/api/users', methods=['POST'])
 def create_user():
+    require_role(["admin"])
     try:
         data = request.get_json() or {}
         username = data.get("username")
@@ -483,6 +562,13 @@ def create_user():
         traceback.print_exc()
         return jsonify({"success": False, "message": "Server error on create_user", "error": str(e)}), 500
 
+# useful debug endpoint
+@app.route("/api/debug", methods=["GET"])
+def debug():
+    return jsonify({
+        "session_username": session.get("username"),
+        "cookies_received": {k: v for k, v in request.cookies.items()}
+    })
+
 if __name__ == "__main__":
-    # run without debug so flask won't return HTML debug pages on exception (that caused JSON decode errors)
     app.run(port=5000, debug=False)
