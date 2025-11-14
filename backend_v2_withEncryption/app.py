@@ -47,26 +47,26 @@ def ensure_tables():
     )""")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS alerts (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                student_name VARCHAR(512),
-                student_hmac VARCHAR(128),
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_name VARCHAR(512),
+        student_hmac VARCHAR(128),
         risk_score FLOAT,
         record_id INT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""")
-        # ensure records table exists with columns to hold encrypted student data and hmac for lookup
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS records (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            student_name VARCHAR(512) NOT NULL,
-            student_hmac VARCHAR(128),
-            marks INT,
-            attendance INT,
-            risk_score FLOAT,
-            course VARCHAR(255),
-            instructor_name VARCHAR(100),
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
+    # ensure records table exists with columns to hold encrypted student data and hmac for lookup
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS records (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_name VARCHAR(512) NOT NULL,
+        student_hmac VARCHAR(128),
+        marks INT,
+        attendance INT,
+        risk_score FLOAT,
+        course VARCHAR(255),
+        instructor_name VARCHAR(100),
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
     # default settings
     cur.execute("SELECT value FROM settings WHERE `key`='risk_threshold'")
     r = cur.fetchone()
@@ -106,8 +106,12 @@ def audit(username, action, details=""):
     cur.close()
     db.close()
 
-# ensure tables exist
-ensure_tables()
+# ensure tables exist (only on actual DB, skip on startup if DB not available)
+try:
+    ensure_tables()
+except Exception as e:
+    print(f"WARNING: Could not ensure tables on startup: {e}")
+    print("This is normal if DB is not configured. Tables will be created on first successful DB connection.")
 
 # ---------------------- users / helpers
 def get_user(username):

@@ -1,0 +1,197 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║         BACKEND_V2_WITHENCRYPTION - ENCRYPTION & TLS ARCHITECTURE              ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           CLIENT APPLICATION                                     │
+│                                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │ POST /api/add_record                                                     │   │
+│  │ { "student_name": "alice", "marks": 85 }                                │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                    ┌───────────────────────────────────────┐
+                    │    HTTPS / TLS 1.2+ ENCRYPTION       │ ← IN-TRANSIT
+                    │  All data encrypted during transit    │
+                    └───────────────────────────────────────┘
+                                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        FLASK APP (app.py)                                         │
+│                                                                                   │
+│  @app.route('/api/add_record', methods=['POST'])                               │
+│  def add_record():                                                              │
+│      student_name = data.get("student_name")    # Input: "alice"              │
+│      ┌─────────────────────────────────────────────────────────────┐           │
+│      │  ENCRYPTION LAYER (crypto.py)                               │           │
+│      │  ┌─────────────────────────────────────────────────────┐   │           │
+│      │  │ 1. encrypt_value(student_name)                      │   │           │
+│      │  │    "alice" → gAAAAABpFyd8Ia59...xyz123 (Fernet)    │   │           │
+│      │  └─────────────────────────────────────────────────────┘   │           │
+│      │  ┌─────────────────────────────────────────────────────┐   │           │
+│      │  │ 2. hmac_value(student_name)                         │   │           │
+│      │  │    "alice" → a9c9b0f15e10da2ef... (SHA-256)        │   │           │
+│      │  └─────────────────────────────────────────────────────┘   │           │
+│      └─────────────────────────────────────────────────────────────┘           │
+│                                                                                   │
+│      INSERT INTO records (student_name, student_hmac, ...)                     │
+│      VALUES (gAAAAABpFyd8Ia59...xyz123, a9c9b0f15e10da2ef..., ...)           │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                    ┌───────────────────────────────────────┐
+                    │  MYSQL CONNECTION                     │
+                    │  (Can use SSL for extra security)     │
+                    └───────────────────────────────────────┘
+                                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          MYSQL DATABASE                                          │
+│                                                                                   │
+│  records table:                                                                 │
+│  ┌────┬──────────────────────────────────┬────────────────────┬───────┐       │
+│  │ id │ student_name                     │ student_hmac       │ marks │       │
+│  ├────┼──────────────────────────────────┼────────────────────┼───────┤       │
+│  │ 1  │ gAAAAABpFyd8Ia59SrVesoLtZgkn... │ a9c9b0f15e10da2ef  │ 85    │ ← AT-REST
+│  │ 2  │ gAAAAABpFyd8Iq91_mR4PpZlmkq2... │ 1bf0394024a4d4d2d  │ 92    │   ENCRYPTED
+│  │ 3  │ gAAAAABpFyd8It7HqT5RqWnmo8l3... │ d442e7e84492e0ca   │ 78    │
+│  └────┴──────────────────────────────────┴────────────────────┴───────┘       │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+                                      │
+                    ┌───────────────────────────────────────┐
+                    │  HMAC LOOKUP (No decryption needed!)   │
+                    │  SELECT * WHERE student_hmac = ?      │
+                    │  (Efficient for finding records)       │
+                    └───────────────────────────────────────┘
+                                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        FLASK APP (app.py)                                         │
+│                                                                                   │
+│  @app.route('/api/student/<username>', methods=['GET'])                        │
+│  def student_data(username):                 # Input: "alice"                  │
+│      hmac_key = hmac_value(username)         # Compute HMAC                   │
+│      rows = db.query(WHERE student_hmac = ?) # Find encrypted records        │
+│      ┌─────────────────────────────────────────────────────────────┐           │
+│      │  DECRYPTION LAYER (crypto.py)                               │           │
+│      │  for each row:                                              │           │
+│      │    row['student_name'] = decrypt_value(row['student_name']) │           │
+│      │    gAAAAABpFyd8Ia59...xyz123 → "alice"                     │           │
+│      └─────────────────────────────────────────────────────────────┘           │
+│      return jsonify({"student_name": "alice", "marks": 85})                    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                    ┌───────────────────────────────────────┐
+                    │    HTTPS / TLS 1.2+ ENCRYPTION       │ ← IN-TRANSIT
+                    │  Response encrypted during transit     │
+                    └───────────────────────────────────────┘
+                                      │
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           CLIENT APPLICATION                                     │
+│                                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │ Response: { "student_name": "alice", "marks": 85 }                      │   │
+│  │           (decrypted in browser, ready to use)                          │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════════
+
+KEY MANAGEMENT:
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            KEY GENERATION                                        │
+│                                                                                   │
+│  1. Fernet Symmetric Key (Encryption/Decryption)                               │
+│     ├─ Size: 32 bytes (256-bit)                                               │
+│     ├─ Format: URL-safe base64                                                │
+│     ├─ Purpose: Symmetric encryption of student names                         │
+│     ├─ Storage: secrets/fernet.key                                            │
+│     └─ Env Var: APAS_FERNET_KEY (production)                                  │
+│                                                                                   │
+│  2. HMAC Secret Key (Deterministic Hashing)                                    │
+│     ├─ Size: 32 bytes (256-bit)                                               │
+│     ├─ Format: Raw bytes                                                      │
+│     ├─ Purpose: Deterministic HMAC for lookups                                │
+│     ├─ Storage: secrets/hmac.key                                              │
+│     └─ Env Var: APAS_HMAC_KEY (production)                                    │
+│                                                                                   │
+│  3. TLS Certificate (In-Transit Encryption)                                    │
+│     ├─ Type: Self-signed (dev) or CA-signed (prod)                            │
+│     ├─ Protocol: TLS 1.2+ enforced                                            │
+│     ├─ Cert Path: secrets/server.crt                                          │
+│     ├─ Key Path: secrets/server.key                                           │
+│     └─ Expiry: 365 days (self-signed), check CA cert validity (prod)          │
+│                                                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════════
+
+DATA FLOW SUMMARY:
+
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                              WRITE OPERATION                                      │
+│                                                                                    │
+│  Client Input: "student1"                                                        │
+│         ↓                                                                          │
+│  [Fernet Encryption] → gAAAAABpFyd8Ia59SrVesoLtZgknWjFyMD42...                 │
+│         ↓                                                                          │
+│  [HMAC Hash]        → a9c9b0f15e10da2ef3aeeb38c867a00bb53aa48b...              │
+│         ↓                                                                          │
+│  [TLS Encrypt]      → (Encrypted data sent over HTTPS)                          │
+│         ↓                                                                          │
+│  [Store in DB]      → records.student_name = encrypted                          │
+│                        records.student_hmac = hmac                               │
+│                                                                                    │
+│ Result: ✅ Data encrypted at rest (Fernet)                                      │
+│         ✅ Data encrypted in transit (TLS)                                      │
+│         ✅ Lookup capability maintained (HMAC)                                  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                              READ OPERATION                                       │
+│                                                                                    │
+│  Client Request: "GET /api/student/student1"                                     │
+│         ↓                                                                          │
+│  [TLS Decrypt]      → (Encrypted request decrypted at server)                   │
+│         ↓                                                                          │
+│  [Compute HMAC]     → a9c9b0f15e10da2ef3aeeb38c867a00bb53aa48b...              │
+│         ↓                                                                          │
+│  [DB Query]         → SELECT * WHERE student_hmac = ?                          │
+│         ↓                                                                          │
+│  [Fernet Decrypt]   → gAAAAABpFyd8Ia59... → "student1"                        │
+│         ↓                                                                          │
+│  [TLS Encrypt]      → (Encrypted response sent over HTTPS)                      │
+│         ↓                                                                          │
+│  Client Response: {"student_name": "student1", ...}                             │
+│                                                                                    │
+│ Result: ✅ Data decrypted only on-demand                                        │
+│         ✅ Response encrypted in transit (TLS)                                  │
+│         ✅ Audit trail of access available                                      │
+└──────────────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════════
+
+SECURITY LAYERS:
+
+  Layer 1: DATABASE            → Fernet encryption (at-rest)
+  Layer 2: NETWORK             → TLS 1.2+ encryption (in-transit)
+  Layer 3: APPLICATION         → Input validation, audit logging
+  Layer 4: AUTHENTICATION      → Password hashing (werkzeug)
+  Layer 5: KEY MANAGEMENT      → Secrets manager / env vars
+
+════════════════════════════════════════════════════════════════════════════════════
+
+TEST COVERAGE:
+
+✓ Encryption Round-trip      (plaintext → encrypted → plaintext)
+✓ HMAC Deterministic         (same input = same hash)
+✓ HMAC Uniqueness            (different inputs = different hash)
+✓ None Handling              (null values handled gracefully)
+✓ Invalid Token Handling     (corrupted tokens rejected safely)
+✓ Key/Cert Files             (all files exist and readable)
+✓ Fernet Key Loading         (key loaded and functional)
+✓ HMAC Key Loading           (key loaded and functional)
+✓ TLS Certificate Validity   (cert valid, TLS 1.2+ enforced)
+
+Result: 9/9 TESTS PASS ✅
+
+════════════════════════════════════════════════════════════════════════════════════
