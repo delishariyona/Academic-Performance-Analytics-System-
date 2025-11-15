@@ -1,5 +1,3 @@
-id,marks,attendance,risk_score,course,instructor_name,timestamp,student_alias
-10,60,60,0.4,Machine Learning ,instructor1,2025-11-14 11:57:37,sid_4203
-11,60,60,0.4,Machine Learning ,instructor1,2025-11-14 11:58:49,sid_4203
-12,12,19,0.852,Machine Learning ,instructor1,2025-11-14 11:59:17,sid_7203
-13,60,60,0.4,Machine Learning ,instructor1,2025-11-14 12:05:29,sid_4203
+id,student_hmac,marks,attendance,risk_score,course,instructor_name,timestamp,student_alias
+1,a9c9b0f15e10da2ef3aeeb38c867a00bb53aa48b2892f9bac448389472ffecb2,80,90,0.16,Math,instructor1,2025-11-15 15:24:11,sid_1535
+2,1bf0394024a4d4d2d143adb1c22de51d14129bc0bb7dacedec2845a982a7b3b7,60,70,0.36,Bio,instructor1,2025-11-15 15:24:11,sid_9936
