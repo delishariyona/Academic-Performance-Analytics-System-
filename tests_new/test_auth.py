@@ -9,14 +9,14 @@ if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
 # import the backend app module by file so local imports resolve correctly
+import werkzeug
+if not hasattr(werkzeug, '__version__'):
+    werkzeug.__version__ = '0'
 import importlib.util
 spec = importlib.util.spec_from_file_location('backend_app', os.path.join(BACKEND_DIR, 'app.py'))
 backend_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backend_mod)
 app = backend_mod.app
-import werkzeug
-if not hasattr(werkzeug, '__version__'):
-    werkzeug.__version__ = '0'
 
 
 def test_successful_login():

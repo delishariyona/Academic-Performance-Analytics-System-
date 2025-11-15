@@ -7,16 +7,19 @@ BACKEND_DIR = os.path.join(ROOT, 'backend_v2_withEncryption_withRoles')
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 import importlib.util
+import werkzeug
+if not hasattr(werkzeug, '__version__'):
+    werkzeug.__version__ = '0'
 spec = importlib.util.spec_from_file_location('backend_app', os.path.join(BACKEND_DIR, 'app.py'))
 backend_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backend_mod)
 app = backend_mod.app
 from models import get_db
-import werkzeug
-if not hasattr(werkzeug, '__version__'):
-    werkzeug.__version__ = '0'
-
-
+def login_client(username='admin', password='adminpass'):
+    c = app.test_client()
+    r = c.post('/api/login', json={'username': username, 'password': password})
+    assert r.status_code == 200
+    return c
 def login_client(username='admin', password='adminpass'):
     c = app.test_client()
     r = c.post('/api/login', json={'username': username, 'password': password})

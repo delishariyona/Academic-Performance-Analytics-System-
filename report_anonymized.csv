@@ -1,0 +1,2 @@
+id,student_hmac,marks,attendance,risk_score,course,instructor_name,timestamp,student_alias
+1,c456b9b2480549e89d94ac1d223fe8c3304fa1336e31e2cd673a0444d963233c,50,90,0.5,C101,instr,t,sid_2870
