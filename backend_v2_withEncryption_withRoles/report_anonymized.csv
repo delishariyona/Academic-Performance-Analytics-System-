@@ -1,0 +1,5 @@
+id,marks,attendance,risk_score,course,instructor_name,timestamp,student_alias
+10,60,60,0.4,Machine Learning ,instructor1,2025-11-14 11:57:37,sid_4203
+11,60,60,0.4,Machine Learning ,instructor1,2025-11-14 11:58:49,sid_4203
+12,12,19,0.852,Machine Learning ,instructor1,2025-11-14 11:59:17,sid_7203
+13,60,60,0.4,Machine Learning ,instructor1,2025-11-14 12:05:29,sid_4203
